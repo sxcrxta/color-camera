@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="색변화">
+<meta name="theme-color" content="#111111">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<title>색 변화 측정</title>
+<style>
+:root{--bg:#111;--panel:#1b1b1b;--line:#333;--text:#eee;--dim:#999;--accent:#4da3ff;--ok:#3ecf6e;--warn:#ffb648;--rate:#c27cff}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+#app{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+#main{flex:1;display:flex;min-height:0;gap:6px;padding:6px}
+@media (orientation:portrait){#main{flex-direction:column}}
+#camWrap,#graphWrap{position:relative;flex:1;min-width:0;min-height:0;background:#000;border-radius:10px;overflow:hidden}
+#graphWrap{background:var(--panel)}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+canvas.full{position:absolute;inset:0;width:100%;height:100%}
+#status{position:absolute;left:8px;top:8px;right:8px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+.chip{background:rgba(0,0,0,.65);padding:4px 9px;border-radius:999px;font-size:13px;font-variant-numeric:tabular-nums}
+#swatch{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid #fff5}
+#banner{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:var(--ok);color:#000;font-weight:700;padding:8px 14px;border-radius:999px;font-size:15px;display:none;white-space:nowrap}
+#info{position:absolute;left:8px;top:6px;right:8px;font-size:12px;color:var(--dim);display:flex;flex-wrap:wrap;gap:4px 12px;pointer-events:none;font-variant-numeric:tabular-nums}
+#info b{color:var(--text);font-weight:600}
+#bar{display:flex;gap:6px;padding:0 6px 6px;align-items:center;flex-wrap:wrap}
+button{background:#2a2a2a;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:15px;font-weight:600}
+button.primary{background:var(--accent);border-color:var(--accent);color:#000}
+button.danger{background:#e5484d;border-color:#e5484d;color:#fff}
+button:disabled{opacity:.4}
+#timer{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;min-width:74px;text-align:center}
+.spacer{flex:1}
+#settings{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:10;padding:16px}
+#settings .box{background:var(--panel);border-radius:14px;padding:16px;width:100%;max-width:420px;max-height:90vh;overflow:auto}
+#settings h3{margin-bottom:10px}
+#settings label{display:block;font-size:14px;margin:12px 0 4px;color:var(--dim)}
+#settings label span{color:var(--text);float:right;font-variant-numeric:tabular-nums}
+#settings input[type=range]{width:100%}
+#settings select{width:100%;padding:8px;border-radius:8px;background:#2a2a2a;color:var(--text);border:1px solid var(--line);font-size:15px}
+#settings p{font-size:12px;color:var(--dim);margin-top:4px;line-height:1.45}
+#start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg);z-index:20;padding:24px;text-align:center}
+#start p{color:var(--dim);font-size:14px;line-height:1.6;max-width:420px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="main">
+    <div id="camWrap">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay" class="full"></canvas>
+      <div id="status">
+        <span class="chip"><span id="swatch"></span><span id="rgb">-</span></span>
+        <span class="chip" id="stateChip">대기</span>
+      </div>
+      <div id="banner"></div>
+    </div>
+    <div id="graphWrap">
+      <canvas id="graph" class="full"></canvas>
+      <div id="info">
+        <span>ΔE <b id="iDE">-</b></span>
+        <span>속도 <b id="iRate">-</b> /s</span>
+        <span>시작 <b id="iStart">-</b></span>
+        <span>최대변화 <b id="iPeak">-</b></span>
+        <span>종료 <b id="iEnd">-</b></span>
+      </div>
+    </div>
+  </div>
+  <div id="bar">
+    <button id="btnRun" class="primary">측정 시작</button>
+    <span id="timer">0.0s</span>
+    <button id="btnMark">표시</button>
+    <span class="spacer"></span>
+    <button id="btnRec">녹화</button>
+    <button id="btnCsv" disabled>CSV</button>
+    <button id="btnSet">설정</button>
+  </div>
+</div>
+
+<div id="start">
+  <h2>색 변화 측정</h2>
+  <p>비커를 위에서 찍고, 화면의 원 안 색이 처음 색에서 얼마나 달라졌는지(ΔE)를 그래프로 그립니다.<br>색이 더 이상 변하지 않으면 그 시점을 <b>반응 종료</b>로 표시합니다.<br><br>원을 옮기려면 영상을 탭하세요.</p>
+  <button id="btnCam" class="primary">카메라 켜기</button>
+  <p id="camErr" style="color:#ff6b6b"></p>
+</div>
+
+<div id="settings">
+  <div class="box">
+    <h3>설정</h3>
+    <label>측정 원 크기 <span id="vRoi"></span></label>
+    <input type="range" id="sRoi" min="3" max="40" value="12">
+    <label>그래프 값</label>
+    <select id="sMetric">
+      <option value="de">ΔE (처음 색과의 색 차이)</option>
+      <option value="L">밝기 L*</option>
+    </select>
+    <label>변화 시작 기준 ΔE <span id="vStartThr"></span></label>
+    <input type="range" id="sStartThr" min="1" max="30" step="0.5" value="5">
+    <p>처음 색과 이만큼 달라지면 "변화 시작"으로 봅니다.</p>
+    <label>멈춤 판정 속도 (ΔE/s) <span id="vStopRate"></span></label>
+    <input type="range" id="sStopRate" min="0.05" max="3" step="0.05" value="0.4">
+    <p>변화 속도가 이 값보다 느린 상태가 아래 시간 동안 계속되면 "종료"로 봅니다.</p>
+    <label>멈춤 유지 시간 (s) <span id="vWin"></span></label>
+    <input type="range" id="sWin" min="1" max="15" step="0.5" value="4">
+    <label>기준색 측정 시간 (s) <span id="vBase"></span></label>
+    <input type="range" id="sBase" min="0.5" max="5" step="0.5" value="1">
+    <p>측정 시작 직후 이 시간 동안의 평균 색을 처음 색으로 씁니다. 용액을 다 섞은 직후 시작을 누르세요.</p>
+    <label>노출/화이트밸런스 고정 시도</label>
+    <select id="sLock"><option value="1">켜기</option><option value="0">끄기</option></select>
+    <p>아이폰 사파리는 노출 고정을 지원하지 않을 수 있습니다. 비커 아래에 흰 종이를 깔고, 조명을 일정하게 해 주세요.</p>
+    <div style="margin-top:16px;text-align:right"><button id="btnSetClose" class="primary">닫기</button></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const video = $('video'), overlay = $('overlay'), graph = $('graph');
+const octx = overlay.getContext('2d'), gctx = graph.getContext('2d');
+const sampler = document.createElement('canvas');
+const sctx = sampler.getContext('2d', {willReadFrequently:true});
+
+const S = { roi:12, startThr:5, stopRate:0.4, win:4, base:1, metric:'de', lock:true };
+try { Object.assign(S, JSON.parse(localStorage.getItem('cc-settings')||'{}')); } catch(e){}
+const saveS = () => { try { localStorage.setItem('cc-settings', JSON.stringify(S)); } catch(e){} };
+
+let roiX = 0.5, roiY = 0.5;        // ROI center in video-normalized coords
+let stream = null, track = null;
+let running = false, t0 = 0;
+let data = [];                      // {t,r,g,b,L,A,B,de,ds,rate}
+let base = null, baseAcc = [];
+let tStart = null, tPeak = null, peakRate = 0, tEnd = null, ended = false;
+let marks = [];
+let lastSample = 0, cur = null;
+let wakeLock = null, audioCtx = null;
+
+/* ---------- color math ---------- */
+function lin(c){ c/=255; return c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); }
+function toLab(r,g,b){
+  const R=lin(r),G=lin(g),B=lin(b);
+  let X=(R*0.4124+G*0.3576+B*0.1805)/0.95047, Y=(R*0.2126+G*0.7152+B*0.0722), Z=(R*0.0193+G*0.1192+B*0.9505)/1.08883;
+  const f=v=> v>0.008856 ? Math.cbrt(v) : (7.787*v+16/116);
+  X=f(X);Y=f(Y);Z=f(Z);
+  return [116*Y-16, 500*(X-Y), 200*(Y-Z)];
+}
+
+/* ---------- camera ---------- */
+$('btnCam').onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} }, audio:false });
+    video.srcObject = stream; await video.play();
+    track = stream.getVideoTracks()[0];
+    $('start').style.display = 'none';
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    requestAnimationFrame(loop);
+  } catch(e) {
+    $('camErr').textContent = '카메라를 열 수 없습니다: ' + e.message + ' (https 주소로 접속했는지, 카메라 권한을 허용했는지 확인)';
+  }
+};
+
+async function lockCamera(on){
+  if (!track || !track.getCapabilities) return;
+  try {
+    const cap = track.getCapabilities(), adv = {};
+    if (cap.exposureMode) adv.exposureMode = on && cap.exposureMode.includes('manual') ? 'manual' : 'continuous';
+    if (cap.whiteBalanceMode) adv.whiteBalanceMode = on && cap.whiteBalanceMode.includes('manual') ? 'manual' : 'continuous';
+    if (cap.focusMode) adv.focusMode = on && cap.focusMode.includes('manual') ? 'manual' : 'continuous';
+    if (Object.keys(adv).length) await track.applyConstraints({advanced:[adv]});
+  } catch(e){}
+}
+
+/* ---------- layout helpers ---------- */
+function fit(c){
+  const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
+  const w = Math.round(r.width*d), h = Math.round(r.height*d);
+  if (c.width!==w || c.height!==h){ c.width=w; c.height=h; }
+  return [w,h,d];
+}
+function videoRect(){ // displayed video area inside overlay (object-fit: contain), in canvas px
+  const [w,h] = [overlay.width, overlay.height];
+  const vw = video.videoWidth||16, vh = video.videoHeight||9;
+  const s = Math.min(w/vw, h/vh);
+  return { x:(w-vw*s)/2, y:(h-vh*s)/2, w:vw*s, h:vh*s };
+}
+overlay.addEventListener('pointerdown', e => {
+  const r = overlay.getBoundingClientRect(), d = devicePixelRatio||1, vr = videoRect();
+  const x = ((e.clientX-r.left)*d - vr.x)/vr.w, y = ((e.clientY-r.top)*d - vr.y)/vr.h;
+  if (x>=0&&x<=1&&y>=0&&y<=1){ roiX=x; roiY=y; }
+});
+
+/* ---------- sampling ---------- */
+function sample(){
+  const vw = video.videoWidth, vh = video.videoHeight; if(!vw) return null;
+  const W = 240, H = Math.round(W*vh/vw);
+  if (sampler.width!==W||sampler.height!==H){ sampler.width=W; sampler.height=H; }
+  sctx.drawImage(video,0,0,W,H);
+  const rad = Math.max(2, S.roi/100*Math.min(W,H)/2*2);
+  const cx = roiX*W, cy = roiY*H;
+  const x0=Math.max(0,Math.floor(cx-rad)), y0=Math.max(0,Math.floor(cy-rad));
+  const x1=Math.min(W,Math.ceil(cx+rad)), y1=Math.min(H,Math.ceil(cy+rad));
+  if (x1<=x0||y1<=y0) return null;
+  const img = sctx.getImageData(x0,y0,x1-x0,y1-y0).data;
+  let r=0,g=0,b=0,n=0;
+  for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){
+    const dx=x+0.5-cx, dy=y+0.5-cy; if(dx*dx+dy*dy>rad*rad) continue;
+    const i=((y-y0)*(x1-x0)+(x-x0))*4; r+=img[i];g+=img[i+1];b+=img[i+2];n++;
+  }
+  if(!n) return null;
+  return [r/n,g/n,b/n];
+}
+
+function slope(pts){ // least squares slope of ds over t
+  const n=pts.length; if(n<3) return 0;
+  let st=0,sv=0,stt=0,stv=0;
+  for(const p of pts){st+=p.t;sv+=p.ds;stt+=p.t*p.t;stv+=p.t*p.ds;}
+  const den=n*stt-st*st; return den? (n*stv-st*sv)/den : 0;
+}
+
+function beep(){
+  if(!audioCtx) return;
+  try{ const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.frequency.value=880; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.25,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+0.6);
+    o.start(); o.stop(audioCtx.currentTime+0.6);}catch(e){}
+}
+
+function process(rgb, now){
+  const [r,g,b] = rgb, [L,A,B] = toLab(r,g,b);
+  cur = {r,g,b,L,A,B};
+  if (!running) return;
+  const t = (now - t0)/1000;
+  if (!base){
+    baseAcc.push([L,A,B]);
+    if (t >= S.base){
+      base = baseAcc.reduce((s,v)=>[s[0]+v[0],s[1]+v[1],s[2]+v[2]],[0,0,0]).map(v=>v/baseAcc.length);
+    }
+  }
+  const ref = base || baseAcc[0];
+  const de = Math.hypot(L-ref[0], A-ref[1], B-ref[2]);
+  const val = S.metric==='L' ? L : de;
+  // smoothing: mean over last 0.5 s
+  const recent = data.filter(p=>p.t>t-0.5);
+  const ds = (recent.reduce((s,p)=>s+p.v,0)+val)/(recent.length+1);
+  const p = {t,r,g,b,L,A,B,de,v:val,ds,rate:0};
+  data.push(p);
+  // rate over last 1 s (for display) and window for stop detection
+  const rate1 = Math.abs(slope(data.filter(q=>q.t>t-1)));
+  p.rate = rate1;
+  if (!base) return;
+  const deS = (recent.reduce((s,q)=>s+q.de,0)+de)/(recent.length+1);
+  if (tStart===null && deS >= S.startThr){
+    // back-track to the point where change began (deS first exceeded 1/3 of threshold)
+    let k=data.length-1; while(k>0 && data[k-1].de > S.startThr/3 && data[k-1].t>S.base) k--;
+    tStart = data[k].t;
+  }
+  if (tStart!==null){
+    if (rate1 > peakRate && !ended){ peakRate = rate1; tPeak = t; }
+    const winPts = data.filter(q=>q.t>t-S.win);
+    const longEnough = t - tStart > 1 && winPts.length>5 && (winPts[0].t <= t-S.win+0.3);
+    if (longEnough){
+      // overall slope across the hold window must be below the threshold
+      const wr = Math.abs(slope(winPts));
+      if (!ended && wr < S.stopRate){ ended = true; tEnd = Math.max(tStart, t - S.win); showBanner(); beep(); }
+      else if (ended && wr > S.stopRate*2.5){ ended = false; tEnd = null; hideBanner(); }
+    }
+  }
+}
+
+function showBanner(){ const b=$('banner'); b.textContent=`변화 종료 ≈ ${tEnd.toFixed(1)} s`; b.style.display='block'; }
+function hideBanner(){ $('banner').style.display='none'; }
+
+/* ---------- drawing ---------- */
+function drawOverlay(){
+  const [w,h,d] = fit(overlay); octx.clearRect(0,0,w,h);
+  const vr = videoRect();
+  const rad = S.roi/100*Math.min(vr.w,vr.h);
+  const cx = vr.x+roiX*vr.w, cy = vr.y+roiY*vr.h;
+  octx.lineWidth = 3*d; octx.strokeStyle = ended ? '#3ecf6e' : (tStart!==null ? '#ffb648' : '#fff');
+  octx.beginPath(); octx.arc(cx,cy,rad,0,Math.PI*2); octx.stroke();
+  octx.lineWidth = 1*d; octx.strokeStyle='#0008'; octx.beginPath(); octx.arc(cx,cy,rad+2*d,0,Math.PI*2); octx.stroke();
+}
+
+function fmt(t){ return t===null||t===undefined ? '-' : t.toFixed(1)+'s'; }
+
+function drawGraph(){
+  const [w,h,d] = fit(graph); const g=gctx;
+  g.fillStyle='#1b1b1b'; g.fillRect(0,0,w,h);
+  const padL=40*d, padR=10*d, padT=40*d, padB=22*d, gap=14*d;
+  const H1 = (h-padT-padB-gap)*0.68, H2 = (h-padT-padB-gap)-H1;
+  const y1=padT, y2=padT+H1+gap, gw=w-padL-padR;
+  const tMax = Math.max(20, data.length? data[data.length-1].t*1.08 : 0);
+  let vMin=0, vMax=Math.max(S.metric==='L'?100:10, ...data.map(p=>p.v)) * (S.metric==='L'?1:1.1);
+  if (S.metric==='L'){ vMin = Math.max(0, Math.min(...data.map(p=>p.v), 100)-5); vMax = Math.min(100, Math.max(...data.map(p=>p.v),0)+5); if(vMax-vMin<10){vMax=vMin+10;} }
+  const rMax = Math.max(S.stopRate*4, ...data.map(p=>p.rate))*1.1;
+  const X = t => padL + t/tMax*gw;
+  const Y1 = v => y1 + H1 - (v-vMin)/(vMax-vMin)*H1;
+  const Y2 = v => y2 + H2 - v/rMax*H2;
+  g.font = `${11*d}px -apple-system,sans-serif`; g.textBaseline='middle';
+  // grid
+  g.strokeStyle='#2c2c2c'; g.lineWidth=1*d; g.fillStyle='#888'; g.textAlign='right';
+  for(let i=0;i<=4;i++){ const v=vMin+(vMax-vMin)*i/4, y=Y1(v); g.beginPath(); g.moveTo(padL,y); g.lineTo(w-padR,y); g.stroke(); g.fillText(v.toFixed(0), padL-5*d, y); }
+  g.beginPath(); g.moveTo(padL,y2+H2); g.lineTo(w-padR,y2+H2); g.stroke();
+  const step = tMax>120?20: tMax>60?10: 5; g.textAlign='center';
+  for(let t=0;t<=tMax;t+=step){ const x=X(t); g.beginPath(); g.moveTo(x,y1); g.lineTo(x,y2+H2); g.stroke(); g.fillText(t+'s', x, h-padB/2); }
+  g.textAlign='left'; g.fillStyle='#aaa';
+  g.fillText(S.metric==='L'?'밝기 L*':'ΔE', padL+4*d, y1+8*d);
+  g.fillStyle='#c27cff'; g.fillText('변화 속도 (ΔE/s)', padL+4*d, y2+8*d);
+  // stop threshold
+  g.setLineDash([4*d,4*d]); g.strokeStyle='#c27cff88'; g.beginPath(); g.moveTo(padL,Y2(S.stopRate)); g.lineTo(w-padR,Y2(S.stopRate)); g.stroke(); g.setLineDash([]);
+  // markers
+  const vline=(t,col,label)=>{ if(t===null) return; const x=X(t); g.strokeStyle=col; g.lineWidth=2*d; g.beginPath(); g.moveTo(x,y1); g.lineTo(x,y2+H2); g.stroke(); g.fillStyle=col; g.textAlign='center'; g.fillText(label,x,y1-8*d); };
+  if (base) g.fillStyle='#ffffff10', g.fillRect(X(0),y1,X(S.base)-X(0),H1+gap+H2);
+  marks.forEach((m,i)=>vline(m,'#888',`표시${i+1}`));
+  vline(tStart,'#ffb648','시작'); vline(tPeak,'#ff6b6b','최대'); vline(tEnd,'#3ecf6e','종료');
+  // series: colored dots in actual color + line
+  if (data.length>1){
+    g.lineWidth=2.5*d; g.strokeStyle='#4da3ff'; g.beginPath();
+    data.forEach((p,i)=>{ const x=X(p.t), y=Y1(p.ds); i?g.lineTo(x,y):g.moveTo(x,y); }); g.stroke();
+    // actual color strip
+    const sh=6*d;
+    data.forEach((p,i)=>{ if(i===0) return; const x0=X(data[i-1].t), x1=X(p.t); g.fillStyle=`rgb(${p.r|0},${p.g|0},${p.b|0})`; g.fillRect(x0,y1+H1-sh,x1-x0+1,sh); });
+    g.lineWidth=1.5*d; g.strokeStyle='#c27cff'; g.beginPath();
+    data.forEach((p,i)=>{ const x=X(p.t), y=Y2(Math.min(p.rate,rMax)); i?g.lineTo(x,y):g.moveTo(x,y); }); g.stroke();
+  }
+}
+
+function updateInfo(){
+  if (cur){
+    $('swatch').style.background=`rgb(${cur.r|0},${cur.g|0},${cur.b|0})`;
+    $('rgb').textContent=`R${cur.r|0} G${cur.g|0} B${cur.b|0}`;
+  }
+  const last = data[data.length-1];
+  $('iDE').textContent = last ? last.de.toFixed(1) : '-';
+  $('iRate').textContent = last ? last.rate.toFixed(2) : '-';
+  $('iStart').textContent = fmt(tStart); $('iPeak').textContent = fmt(tPeak); $('iEnd').textContent = fmt(tEnd);
+  const chip = $('stateChip');
+  chip.textContent = !running ? (data.length?'정지됨':'대기') : !base ? '기준색 측정 중…' : ended ? '변화 종료' : tStart!==null ? '변화 중' : '변화 없음';
+  chip.style.color = ended ? '#3ecf6e' : tStart!==null ? '#ffb648' : '#eee';
+  $('timer').textContent = running ? ((performance.now()-t0)/1000).toFixed(1)+'s' : (data.length? data[data.length-1].t.toFixed(1)+'s':'0.0s');
+}
+
+function loop(now){
+  if (video.readyState>=2 && now - lastSample >= 100){ // 10 Hz
+    lastSample = now; const rgb = sample(); if (rgb) process(rgb, now);
+  }
+  drawOverlay(); drawGraph(); updateInfo();
+  if (recording) drawComposite();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- controls ---------- */
+$('btnRun').onclick = async () => {
+  if (!running){
+    data=[]; base=null; baseAcc=[]; tStart=null; tPeak=null; peakRate=0; tEnd=null; ended=false; marks=[]; hideBanner();
+    if (S.lock) await lockCamera(true);
+    running=true; t0=performance.now();
+    $('btnRun').textContent='정지'; $('btnRun').className='danger'; $('btnCsv').disabled=true;
+    try{ if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); }catch(e){}
+    try{ wakeLock = await navigator.wakeLock?.request('screen'); }catch(e){}
+  } else {
+    running=false; await lockCamera(false);
+    $('btnRun').textContent='측정 시작'; $('btnRun').className='primary'; $('btnCsv').disabled=!data.length;
+    try{ wakeLock?.release(); }catch(e){}
+  }
+};
+$('btnMark').onclick = () => { if(running) marks.push((performance.now()-t0)/1000); };
+
+function share(blob, name){
+  const file = new File([blob], name, {type:blob.type});
+  if (navigator.canShare && navigator.canShare({files:[file]})) { navigator.share({files:[file]}).catch(()=>{}); return; }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+}
+function stamp(){ const d=new Date(), p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
+
+$('btnCsv').onclick = () => {
+  let s = `# 시작,${fmt(tStart)},최대변화,${fmt(tPeak)},종료,${fmt(tEnd)},표시,${marks.map(m=>m.toFixed(1)).join(' ')}\n`;
+  s += 't(s),R,G,B,L*,a*,b*,dE,dE_smooth,rate(dE/s)\n';
+  for(const p of data) s += [p.t.toFixed(2),p.r.toFixed(1),p.g.toFixed(1),p.b.toFixed(1),p.L.toFixed(2),p.A.toFixed(2),p.B.toFixed(2),p.de.toFixed(2),p.ds.toFixed(2),p.rate.toFixed(3)].join(',')+'\n';
+  share(new Blob(['﻿'+s],{type:'text/csv'}), `color_${stamp()}.csv`);
+};
+
+/* ---------- recording: video + graph side by side ---------- */
+let recording=false, recorder=null, chunks=[];
+const comp = document.createElement('canvas'), cctx = comp.getContext('2d');
+function drawComposite(){
+  const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  const H=720, VW=Math.round(H*vw/vh), GW=Math.round(H*0.9);
+  if(comp.width!==VW+GW||comp.height!==H){comp.width=VW+GW;comp.height=H;}
+  cctx.drawImage(video,0,0,VW,H);
+  cctx.drawImage(overlay, (overlay.width-videoRect().w)/2, (overlay.height-videoRect().h)/2, videoRect().w, videoRect().h, 0,0,VW,H);
+  cctx.drawImage(graph,VW,0,GW,H);
+  cctx.fillStyle='#000a'; cctx.fillRect(10,10,330,40); cctx.fillStyle='#fff'; cctx.font='bold 26px sans-serif'; cctx.textBaseline='middle';
+  cctx.fillText(`${$('timer').textContent}  ΔE ${$('iDE').textContent}`, 20, 30);
+}
+$('btnRec').onclick = () => {
+  if (!recording){
+    if (!window.MediaRecorder){ alertMsg('이 브라우저는 녹화를 지원하지 않습니다'); return; }
+    drawComposite();
+    const cs = comp.captureStream ? comp.captureStream(30) : stream;
+    const type = ['video/mp4','video/webm;codecs=vp9','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+    try { recorder = new MediaRecorder(cs, type?{mimeType:type}:{}); } catch(e){ recorder = new MediaRecorder(stream); }
+    chunks=[]; recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    recorder.onstop=()=>{ const t=recorder.mimeType||'video/mp4'; share(new Blob(chunks,{type:t}), `color_${stamp()}.${t.includes('mp4')?'mp4':'webm'}`); };
+    recorder.start(1000); recording=true; $('btnRec').textContent='녹화 중지'; $('btnRec').className='danger';
+  } else {
+    recording=false; recorder.stop(); $('btnRec').textContent='녹화'; $('btnRec').className='';
+  }
+};
+function alertMsg(m){ const b=$('banner'); b.textContent=m; b.style.display='block'; b.style.background='#ffb648'; setTimeout(()=>{b.style.display='none';b.style.background='';},2500); }
+
+/* ---------- settings ---------- */
+const bind = (id, key, out, f=v=>v) => { const el=$(id); el.value=S[key]; const upd=()=>{ S[key]=el.type==='range'?parseFloat(el.value):el.value; if(out) $(out).textContent=f(S[key]); saveS(); }; el.oninput=upd; upd(); };
+bind('sRoi','roi','vRoi',v=>v+'%');
+bind('sStartThr','startThr','vStartThr');
+bind('sStopRate','stopRate','vStopRate');
+bind('sWin','win','vWin',v=>v+' s');
+bind('sBase','base','vBase',v=>v+' s');
+bind('sMetric','metric');
+$('sLock').value = S.lock?'1':'0'; $('sLock').onchange=()=>{S.lock=$('sLock').value==='1';saveS();};
+$('btnSet').onclick=()=>$('settings').style.display='flex';
+$('btnSetClose').onclick=()=>$('settings').style.display='none';
+$('settings').onclick=e=>{ if(e.target.id==='settings') $('settings').style.display='none'; };
+</script>
+</body>
+</html>
